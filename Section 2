@@ -1,0 +1,138 @@
+[14:48, 22.07.2024] kerim arlı: # Install necessary libraries
+!pip install opencv-python torch torchvision ultralytics matplotlib timm
+
+import numpy as np
+import os
+import cv2
+import torch
+import matplotlib.pyplot as plt
+from ultralytics import YOLO
+
+# Load YOLOv8 model
+print("Loading YOLOv8 model...")
+yolo_model = YOLO("yolov8n.pt")  # Adjust this if you have a different model file
+print("YOLOv8 model loaded.")
+
+# Load MiDaS model from PyTorch Hub
+print("Loading MiDaS model...")
+midas_model_type = "DPT_Hybrid"  # You can change this as needed
+midas_model = torch.hub.load("intel-isl/MiDaS", midas_model_type)
+midas_model.eval()
+print("MiDaS model loaded.")
+
+# Load the transform to normalize the image for the MiDaS model
+print("Loading MiDaS transforms...")
+midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
+
+# Choose the appropriate transform based on the model type
+midas_transform = midas_transforms.dpt_transform if midas_model_type in ["DPT_Large", "DPT_Hybrid"] else midas_transforms.small_transform
+print("MiDaS transforms loaded.")
+
+# Upload your video file
+from google.colab import files
+uploaded = files.upload()
+video_path = next(iter(uploaded))
+
+# Load video
+cap = cv2.VideoCapture(video_path)
+if not cap.isOpened():
+    print("Error: Could not open video.")
+    exit()
+
+frame_count = 0  # To keep track of the frame count
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret:
+        print("End of video or error in reading frame.")
+        break
+
+    frame_count += 1
+    print(f"Processing frame {frame_count}...")
+
+    # Object Detection using YOLOv8
+    results = yolo_model(frame)
+    boxes = results[0].boxes
+
+    # Depth Estimation using MiDaS
+    img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
+    input_tensor = midas_transform(img).squeeze(0)
+
+    # Check the shape of the input tensor and fix it if necessary
+    #print("Input tensor shape (before fix):", input_tensor.shape)
+    #if len(input_tensor.shape) != 4:
+        #input_tensor = input_tensor.unsqueeze(0)  # Add a batch dimension if missing
+    #print("Input tensor shape (after fix):", input_tensor.shape)
+    # Ensure the input tensor has a batch dimension
+    if len(input_tensor.shape) == 3:
+        input_tensor = input_tensor.unsqueeze(0)  # Add a batch dimension if missing
+    with torch.no_grad():
+        depth_map = midas_model(input_tensor)
+    depth_map = depth_map.squeeze().cpu().numpy()
+
+    # Normalize depth map for visualization
+    depth_map = (depth_map - depth_map.min()) / (depth_map.max() - depth_map.min())
+    depth_map = (depth_map * 255).astype("uint8")
+    depth_map = cv2.applyColorMap(depth_map, cv2.COLORMAP_MAGMA)
+
+    # Display the results and check for "crash"
+    detected_objects = []
+
+    for box in boxes:
+        x1, y1, x2, y2 = map(int, box.xyxy[0])
+        detected_objects.append((x1, y1, x2, y2))
+
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+    # Check for intersections and equal depth
+    for i in range(len(detected_objects)):
+        for j in range(i + 1, len(detected_objects)):
+            # Check for intersection
+            x1_i, y1_i, x2_i, y2_i = detected_objects[i]
+            x1_j, y1_j, x2_j, y2_j = detected_objects[j]
+            if (x1_i < x2_j and x2_i > x1_j and y1_i < y2_j and y2_i > y1_j):
+               depth_i = depth_map[y1_i:y2_i, x1_i:x2_i].mean()
+               depth_j = depth_map[y1_j:y2_j, x1_j:x2_j].mean()
+               if np.isclose(depth_i, depth_j, atol=5):  # Adjust threshold as needed
+                    print("Crash detected!")
+
+    # Display using matplotlib
+    plt.figure(figsize=(10, 5))
+    plt.subplot(1, 2, 1)
+    plt.title("Detected Objects")
+    plt.imshow(frame)
+    plt.axis('off')
+
+    plt.subplot(1, 2, 2)
+    plt.title("Depth Map")
+    plt.imshow(depth_map)
+    plt.axis('off')
+
+    plt.show()
+
+# Release video capture
+cap.release()
+[10:48, 25.07.2024] kerim arlı: import numpy as np
+import os
+import cv2
+import torch
+import matplotlib.pyplot as plt
+from ultralytics import YOLO
+
+# Load YOLOv8 model
+print("Loading YOLOv8 model...")
+yolo_model = YOLO("yolov8n.pt")  # Adjust this if you have a different model file
+print("YOLOv8 model loaded.")
+
+# Load MiDaS model from PyTorch Hub
+print("Loading MiDaS model...")
+midas_model_type = "DPT_Hybrid"  # You can change this as needed
+midas_model = torch.hub.load("intel-isl/MiDaS", midas_model_type)
+midas_model.eval()
+print("MiDaS model loaded.")
+
+# Load the transform to normalize the image for the MiDaS model
+print("Loading MiDaS transforms...")
+midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
+
+# Choose the appropriate transform based on the model type
+midas_trans…
